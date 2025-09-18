@@ -1,64 +1,41 @@
+from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification
 import torch
-from transformers import pipeline
 from sentence_transformers import SentenceTransformer, util
-import numpy as np
 import re
 
 class EnhancedDescriptiveExtractor:
-    def __init__(self, config_file="config.txt"):
-        self.config = self.load_config(config_file)
-        self.similarity_model = SentenceTransformer('all-MiniLM-L6-v2')
-        self.load_descriptive_examples()
-        
-        # Try to load fine-tuned model, fall back to zero-shot classification
+    def __init__(self, model_path="./descriptive_text_model"):
+        # Load fine-tuned model
         try:
+            self.tokenizer = AutoTokenizer.from_pretrained(model_path)
+            self.model = AutoModelForSequenceClassification.from_pretrained(model_path)
             self.classifier = pipeline(
                 "text-classification",
-                model="./model",
-                tokenizer="./model"
+                model=self.model,
+                tokenizer=self.tokenizer,
+                device=0 if torch.cuda.is_available() else -1
             )
+            print("Loaded fine-tuned model")
         except:
+            # Fallback to zero-shot classification
             self.classifier = pipeline(
                 "zero-shot-classification",
-                model="facebook/bart-large-mnli"
+                model="facebook/bart-large-mnli",
+                device=0 if torch.cuda.is_available() else -1
             )
-    
-    def load_config(self, config_file):
-        """Load configuration from file"""
-        config = {}
-        try:
-            with open(config_file, 'r', encoding='utf-8') as f:
-                for line in f:
-                    if ':' in line and not line.strip().startswith('#'):
-                        key, value = line.split(':', 1)
-                        config[key.strip()] = value.strip()
-        except FileNotFoundError:
-            print(f"Config file {config_file} not found.")
-        return config
-    
-    def load_descriptive_examples(self):
-        """Load descriptive examples for similarity matching"""
-        self.descriptive_examples = []
-        try:
-            with open('config.txt', 'r', encoding='utf-8') as f:
-                lines = f.readlines()
-                start_reading = False
-                for line in lines:
-                    if 'descriptive_examples:' in line:
-                        start_reading = True
-                        continue
-                    if start_reading and line.strip().startswith('-'):
-                        example = line.strip()[2:].strip('"\'')
-                        self.descriptive_examples.append(example)
-        except:
-            # Fallback examples
-            self.descriptive_examples = [
-                "The valley stretched out before them, a patchwork of green and gold fields.",
-                "Ancient trees stood tall and proud, their branches reaching toward the heavens.",
-                "The mountains stood as silent sentinels, their peaks dusted with snow."
-            ]
+            print("Using zero-shot classification as fallback")
         
-        # Encode examples for similarity matching
+        # Load similarity model
+        self.similarity_model = SentenceTransformer('all-MiniLM-L6-v2')
+        
+        # Descriptive examples for similarity matching
+        self.descriptive_examples = [
+            "The valley stretched out before them, a patchwork of green and gold fields.",
+            "Ancient trees stood tall and proud, their branches reaching toward the heavens.",
+            "The mountains stood as silent sentinels, their peaks dusted with snow.",
+            "A gentle mist rose from the forest floor, creating an ethereal atmosphere.",
+            "The city skyline glittered against the twilight sky, a mosaic of light and shadow."
+        ]
         self.example_embeddings = self.similarity_model.encode(self.descriptive_examples)
     
     def is_descriptive_similarity(self, text, threshold=0.6):
@@ -69,9 +46,10 @@ class EnhancedDescriptiveExtractor:
     
     def is_descriptive_classifier(self, text, threshold=0.7):
         """Use classifier to determine if text is descriptive"""
-        if hasattr(self.classifier, 'model'):  # Fine-tuned model
+        if hasattr(self, 'tokenizer'):  # Fine-tuned model
             result = self.classifier(text)[0]
-            return result['label'] == 'DESCRIPTIVE' and result['score'] > threshold
+            # Assuming label 1 is descriptive
+            return result['label'] == 'LABEL_1' and result['score'] > threshold
         else:  # Zero-shot classification
             result = self.classifier(
                 text,
@@ -83,25 +61,23 @@ class EnhancedDescriptiveExtractor:
     def extract_descriptive_passages(self, text, num_passages=3, passage_length=3):
         """Extract descriptive passages using multiple methods"""
         sentences = re.split(r'(?<=[.!?])\s+', text)
-        descriptive_sentences = []
+        scored_sentences = []
         
         # Score each sentence
         for sentence in sentences:
             if len(sentence.split()) < 6:  # Skip very short sentences
                 continue
                 
-            similarity_score = self.is_descriptive_similarity(sentence)
-            classifier_score = self.is_descriptive_classifier(sentence)
+            similarity_score = 1.0 if self.is_descriptive_similarity(sentence) else 0.0
+            classifier_score = 1.0 if self.is_descriptive_classifier(sentence) else 0.0
             
-            # Combined score (you could weight these differently)
-            combined_score = 0.6 * classifier_score + 0.4 * similarity_score
-            
-            if combined_score > 0.5:  # Threshold
-                descriptive_sentences.append((sentence, combined_score))
+            # Combined score
+            combined_score = 0.7 * classifier_score + 0.3 * similarity_score
+            scored_sentences.append((sentence, combined_score))
         
-        # Sort by score and take top passages
-        descriptive_sentences.sort(key=lambda x: x[1], reverse=True)
-        top_sentences = [s[0] for s in descriptive_sentences[:num_passages * passage_length]]
+        # Sort by score and take top sentences
+        scored_sentences.sort(key=lambda x: x[1], reverse=True)
+        top_sentences = [s[0] for s in scored_sentences[:num_passages * passage_length * 2]]
         
         # Create passages
         passages = []
@@ -110,3 +86,22 @@ class EnhancedDescriptiveExtractor:
             passages.append(passage)
         
         return passages[:num_passages]
+
+# Example usage
+if __name__ == "__main__":
+    extractor = EnhancedDescriptiveExtractor()
+    
+    sample_text = """
+        The valley stretched out before them, a patchwork of green and gold fields divided by meandering stone walls. 
+        In the distance, mountains rose like jagged teeth against the horizon. 
+        Meanwhile, John decided to go to the market to buy some groceries. 
+        He walked quickly down the street, thinking about his plans for the evening.
+        The forest was ancient, a remnant of a world before men. 
+        Towering redwoods reached for the heavens, their tops lost in the low-hanging clouds.
+    """
+    
+    passages = extractor.extract_descriptive_passages(sample_text, num_passages=2)
+    
+    print("Extracted Descriptive Passages:")
+    for i, passage in enumerate(passages, 1):
+        print(f"\n{i}. {passage}")
