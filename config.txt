@@ -1,0 +1,18 @@
+# Model configuration
+model_name: distilbert-base-uncased
+max_length: 256
+batch_size: 16
+learning_rate: 2e-5
+epochs: 3
+
+# Training parameters
+train_split: 0.8
+validation_split: 0.1
+test_split: 0.1
+
+# Descriptive passage examples (for similarity matching)
+descriptive_examples: 
+  - "The valley stretched out before them, a patchwork of green and gold fields divided by meandering stone walls and hedgerows."
+  - "Ancient trees stood tall and proud, their branches reaching toward the heavens like nature's cathedral."
+  - "The mountains stood as silent sentinels, their peaks dusted with snow even in the warmth of summer."
+  - "A gentle mist rose from the forest floor, creating an ethereal atmosphere in the early morning light."
