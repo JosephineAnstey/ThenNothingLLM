@@ -7,6 +7,29 @@ class GutenbergDataPreparer:
     def __init__(self):
         self.base_url = "https://www.gutenberg.org/files"
         
+        # Keywords for landscape, seascape, and cityscape descriptions
+        self.landscape_keywords = [
+            'mountain', 'hill', 'valley', 'forest', 'wood', 'field', 'meadow', 'river', 'stream', 
+            'brook', 'lake', 'tree', 'flower', 'grass', 'path', 'road', 'countryside', 'landscape',
+            'cliff', 'peak', 'slope', 'glade', 'orchard', 'garden', 'park', 'vineyard', 'prairie'
+        ]
+        
+        self.seascape_keywords = [
+            'sea', 'ocean', 'wave', 'beach', 'shore', 'coast', 'harbor', 'bay', 'tide', 'current',
+            'sail', 'ship', 'boat', 'water', 'foam', 'spray', 'cliff', 'rock', 'island', 'cape',
+            'strand', 'nautical', 'maritime', 'naval', 'seafaring', 'wharf', 'pier', 'dock'
+        ]
+        
+        self.cityscape_keywords = [
+            'city', 'town', 'street', 'avenue', 'boulevard', 'alley', 'square', 'plaza', 'building',
+            'house', 'mansion', 'cottage', 'palace', 'tower', 'spire', 'roof', 'window', 'door',
+            'bridge', 'canal', 'market', 'shop', 'tavern', 'inn', 'church', 'cathedral', 'monument',
+            'urban', 'metropolitan', 'municipal', 'civic', 'downtown', 'suburb', 'quarter', 'district'
+        ]
+        
+        # Combine all keywords
+        self.all_keywords = self.landscape_keywords + self.seascape_keywords + self.cityscape_keywords
+    
     def get_book_text(self, book_id):
         """Fetch book text from Project Gutenberg"""
         try:
@@ -38,16 +61,33 @@ class GutenbergDataPreparer:
             return text[start_index:end_index].strip()
         return text
     
+    def contains_direct_speech(self, text):
+        """Check if text contains direct speech (quotes or dialogue)"""
+        # Look for quotation marks or dialogue indicators
+        if re.search(r'["“”]', text):  # Quotation marks
+            return True
+        if re.search(r'\b(said|replied|answered|exclaimed|cried|whispered|shouted)\b', text, re.IGNORECASE):
+            return True
+        return False
+    
+    def contains_descriptive_keywords(self, text):
+        """Check if text contains landscape/seascape/cityscape keywords"""
+        text_lower = text.lower()
+        return any(keyword in text_lower for keyword in self.all_keywords)
+    
     def extract_passages(self, text, passage_length=3):
-        """Extract passages of specified length"""
-        # Split into sentences
+        """Extract passages focusing on descriptive content"""
         sentences = re.split(r'(?<=[.!?])\s+', text)
         
         passages = []
         for i in range(0, len(sentences) - passage_length + 1, passage_length):
             passage = " ".join(sentences[i:i + passage_length])
-            # Only include passages of reasonable length
-            if 50 < len(passage) < 500:
+            
+            # Filter criteria
+            if (50 < len(passage) < 500 and                    # Reasonable length
+                not self.contains_direct_speech(passage) and   # No direct speech
+                self.contains_descriptive_keywords(passage)):  # Contains descriptive keywords
+                
                 passages.append(passage)
         
         return passages
@@ -63,12 +103,12 @@ class GutenbergDataPreparer:
                 cleaned_text = self.clean_gutenberg_text(text)
                 passages = self.extract_passages(cleaned_text)
                 all_passages.extend(passages)
-                print(f"  Extracted {len(passages)} passages")
+                print(f"  Extracted {len(passages)} descriptive passages")
         
         # Create DataFrame
         df = pd.DataFrame({'text': all_passages, 'label': None, 'notes': ''})
         df.to_csv(output_file, index=False)
-        print(f"Created training data with {len(all_passages)} passages in {output_file}")
+        print(f"Created training data with {len(all_passages)} descriptive passages in {output_file}")
         
         return df
 
@@ -76,8 +116,19 @@ class GutenbergDataPreparer:
 if __name__ == "__main__":
     preparer = GutenbergDataPreparer()
     
-    # Books known for good descriptions (Dickens, Austen, etc.)
-    book_ids = [46, 98, 766, 1023, 1400, 730, 1342, 84, 11, 16]
+    # Books known for good descriptions (focus on descriptive writers)
+    descriptive_books = [
+        98,   # A Tale of Two Cities - Dickens (city descriptions)
+        766,  # David Copperfield - Dickens 
+        1023, # Bleak House - Dickens
+        1400, # Great Expectations - Dickens
+        1342, # Pride and Prejudice - Austen (countryside)
+        84,   # Frankenstein - Shelley (landscapes)
+        25344,# The Scarlet Letter - Hawthorne
+        2701, # Moby Dick - Melville (seascapes)
+        16,   # Peter Pan - Barrie (descriptive)
+        205,  # Wuthering Heights - Brontë (moors)
+    ]
     
     # Create training data
-    preparer.create_training_data(book_ids, "raw_training_data.csv")
+    preparer.create_training_data(descriptive_books, "raw_training_data.csv")
